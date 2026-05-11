@@ -19,7 +19,7 @@ services:
     image: ghcr.io/gedasfx/docker-backup:1
     environment:
       BACKUP_NAME: my-app
-      BACKUP_CRON: "30 1 * * *"
+      BACKUP_INTERVAL: "86400"
 
       BACKUP_RESTIC_REPOSITORY: /mnt/repo
       BACKUP_RESTIC_PASSWORD: ${BACKUP_RESTIC_PASSWORD}

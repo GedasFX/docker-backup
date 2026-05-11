@@ -3,7 +3,7 @@ set -euo pipefail
 
 # ── defaults ────────────────────────────────────────────────────────
 : "${BACKUP_NAME:=${HOSTNAME}}"
-: "${BACKUP_CRON:=30 1 * * *}"
+: "${BACKUP_INTERVAL:=86400}"
 : "${BACKUP_HEALTHCHECK_MAX_AGE:=93600}"
 
 MODULE_DIR="/usr/local/lib/docker-backup/modules.d"
@@ -55,32 +55,28 @@ if [[ "$restic_enabled" == "false" && "$rsync_enabled" == "false" ]]; then
 fi
 
 log "prongs: restic=$restic_enabled rsync=$rsync_enabled modules=[${loaded_modules[*]:-}]"
+log "interval: ${BACKUP_INTERVAL}s"
 
-# ── write crontab ───────────────────────────────────────────────────
-# busybox crond reads /etc/crontabs/<user>; backup.sh runs as the
-# backup user via su-exec so all file access is non-root.
-CRONTAB_FILE="/etc/crontabs/backup"
-echo "$BACKUP_CRON su-exec backup /usr/local/bin/backup.sh" > "$CRONTAB_FILE"
-
-log "cron: $BACKUP_CRON"
-
-# ── restic repo bootstrap (as backup user) ─────────────────────────
+# ── restic repo bootstrap ──────────────────────────────────────────
 if [[ "$restic_enabled" == "true" ]]; then
   export RESTIC_REPOSITORY="$BACKUP_RESTIC_REPOSITORY"
   export RESTIC_PASSWORD="$BACKUP_RESTIC_PASSWORD"
 
   # Auto-init if repo is empty / doesn't exist yet
-  if ! su-exec backup restic cat config >/dev/null 2>&1; then
+  if ! restic cat config >/dev/null 2>&1; then
     log "initializing restic repository at $RESTIC_REPOSITORY"
-    su-exec backup restic init
+    restic init
   fi
 
   # Remove stale locks (safe: single-writer by design)
-  su-exec backup restic unlock --remove-all 2>/dev/null || true
+  restic unlock --remove-all 2>/dev/null || true
 
   log "restic repository ready"
 fi
 
-# ── hand off to cron ────────────────────────────────────────────────
-log "entrypoint complete, starting crond"
-exec crond -f -l 2
+# ── backup loop ─────────────────────────────────────────────────────
+log "entrypoint complete, first backup in ${BACKUP_INTERVAL}s"
+while true; do
+  sleep "$BACKUP_INTERVAL"
+  /usr/local/bin/backup.sh || true
+done

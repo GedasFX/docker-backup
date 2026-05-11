@@ -13,8 +13,7 @@ RUN apk add --no-cache \
         tini \
         bash \
         docker-cli \
-        coreutils \
-        su-exec
+        coreutils
 
 RUN addgroup -g 1000 backup \
     && adduser -u 1000 -G backup -s /bin/bash -D backup \
@@ -36,10 +35,13 @@ RUN chmod +x /usr/local/bin/*.sh
 HEALTHCHECK --interval=1h --timeout=5s --retries=2 \
   CMD /usr/local/bin/healthcheck.sh
 
+USER backup
 ENTRYPOINT ["tini", "--", "/usr/local/bin/entrypoint.sh"]
 
 # ── pg: adds built-in pg_dump support ──────────────────────────────
 FROM base AS pg
 
+USER root
 RUN apk add --no-cache postgresql16-client
 COPY scripts/modules/pg.sh /usr/local/lib/docker-backup/modules.d/
+USER backup
