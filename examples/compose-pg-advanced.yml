@@ -1,110 +1,122 @@
-# Advanced postgres patterns — fallbacks when the image's bundled
-# pg_dump major doesn't match your database, or you'd rather have the
-# dump run inside the database container itself.
+# Advanced postgres patterns -- fallbacks when the image's bundled
+# pg_dump major doesn't match your database, or you'd rather run
+# the dump inside the database container itself.
 #
 # Two patterns shown side-by-side, pick one. Most services should
-# prefer the built-in prong in compose-with-pgdump.yml first.
+# prefer the built-in pg module in compose-with-pgdump.yml first.
 
-name: art-tagger-advanced
+# ─────────────────────────────────────────────────────────────────
+# Pattern A: docker exec via docker.sock
+# ─────────────────────────────────────────────────────────────────
+# The backup container reaches into the running postgres container
+# and runs that container's own pg_dump. Major version always
+# matches the server.
+#
+# Caveat: the image runs as non-root (uid 1000). Mounting
+# docker.sock requires adding the host's docker group so the
+# backup user can talk to the daemon. Check your host's docker
+# gid with: stat -c '%g' /var/run/docker.sock
+
+name: my-app
 
 services:
-  # ─── Pattern A: docker exec via docker.sock ─────────────────────
-  # backup container reaches into the running postgres container and
-  # runs that container's own pg_dump. Major-version always matches
-  # the server.
-  #
-  # Caveat: the image runs as non-root (uid 1000). Mounting docker.sock
-  # requires adding the host's docker group (typically gid 999 or 998)
-  # so the backup user can talk to the daemon. Check your host's docker
-  # gid with: stat -c '%g' /var/run/docker.sock
-
-  postgres-a:
+  postgres:
     image: postgres:17-alpine
     environment:
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_USER: app
       POSTGRES_DB: app
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
-      - /opt/services/.../postgres-a:/var/lib/postgresql/data
+      - pg-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U app"]
+      test: ["CMD-SHELL", "pg_isready -U app -d app"]
       interval: 5s
     restart: unless-stopped
 
-  backup-a:
+  backup:
     image: ghcr.io/gedasfx/docker-backup:1
     group_add:
-      - "999"   # docker group gid on the host — adjust to match yours
+      - "999"   # docker group gid on the host -- adjust to match yours
     environment:
-      BACKUP_NAME: app-a
+      BACKUP_NAME: my-app
       BACKUP_CRON: "30 1 * * *"
       BACKUP_RESTIC_REPOSITORY: /mnt/repo
       BACKUP_RESTIC_PASSWORD: ${BACKUP_RESTIC_PASSWORD}
       BACKUP_RESTIC_SOURCES: /dumps
-      # Pre-hook dumps via docker exec inside the database container.
-      # No BACKUP_PG_HOST set, so the built-in prong is inactive.
       BACKUP_PRE: |
         rm -rf /dumps/db.dump.d
-        docker exec -e PGPASSWORD=${POSTGRES_PASSWORD} postgres-a \
+        docker exec -e PGPASSWORD=${POSTGRES_PASSWORD} my-app-postgres-1 \
           pg_dump -h localhost -U app -d app -F d -Z 0 \
             -f /tmp/db.dump.d
-        docker cp postgres-a:/tmp/db.dump.d /dumps/db.dump.d
-        docker exec postgres-a rm -rf /tmp/db.dump.d
+        docker cp my-app-postgres-1:/tmp/db.dump.d /dumps/db.dump.d
+        docker exec my-app-postgres-1 rm -rf /tmp/db.dump.d
+      BACKUP_WEBHOOK_URL: ${BACKUP_WEBHOOK_URL:-}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      - /opt/services/.../dumps:/dumps
-      - /mnt/hoard/backups/app-a:/mnt/repo
+      - dumps:/dumps
+      - /path/to/backups/my-app:/mnt/repo
     depends_on:
-      postgres-a: { condition: service_healthy }
+      postgres: { condition: service_healthy }
     restart: unless-stopped
 
-  # ─── Pattern B: external dump sidecar ───────────────────────────
-  # Dedicated pg-dump-local container produces a fresh dump hourly
-  # into a shared volume; docker-backup snapshots the volume nightly.
-  # Useful when the database engine isn't postgres at all, or when you
-  # want dumps more often than the backup cadence.
+volumes:
+  pg-data:
+  dumps:
 
-  postgres-b:
-    image: postgres:14-alpine
-    environment:
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_USER: app
-      POSTGRES_DB: app
-    volumes:
-      - /opt/services/.../postgres-b:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U app"]
-      interval: 5s
-    restart: unless-stopped
 
-  pg-dump-b:
-    image: prodrigestivill/postgres-backup-local:14   # match server major
-    environment:
-      POSTGRES_HOST: postgres-b
-      POSTGRES_DB: app
-      POSTGRES_USER: app
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_EXTRA_OPTS: "-F d -Z 0"
-      SCHEDULE: "@hourly"
-      BACKUP_DIR: /dumps
-      BACKUP_KEEP_DAYS: 1
-    volumes:
-      - /opt/services/.../dumps-b:/dumps
-    depends_on:
-      postgres-b: { condition: service_healthy }
-    restart: unless-stopped
-
-  backup-b:
-    image: ghcr.io/gedasfx/docker-backup:1
-    environment:
-      BACKUP_NAME: app-b
-      BACKUP_CRON: "40 1 * * *"
-      BACKUP_RESTIC_REPOSITORY: /mnt/repo
-      BACKUP_RESTIC_PASSWORD: ${BACKUP_RESTIC_PASSWORD}
-      BACKUP_RESTIC_SOURCES: /dumps
-    volumes:
-      - /opt/services/.../dumps-b:/dumps:ro
-      - /mnt/hoard/backups/app-b:/mnt/repo
-    depends_on:
-      - pg-dump-b
-    restart: unless-stopped
+# ─────────────────────────────────────────────────────────────────
+# Pattern B: external dump sidecar
+# ─────────────────────────────────────────────────────────────────
+# A dedicated dump container produces a fresh dump hourly into a
+# shared volume; docker-backup snapshots the volume nightly.
+# Useful when the database engine isn't postgres at all, or when
+# you want dumps more often than the backup cadence.
+#
+# To use this pattern, replace the services block above with:
+#
+#   services:
+#     postgres:
+#       image: postgres:14-alpine
+#       environment:
+#         POSTGRES_DB: app
+#         POSTGRES_USER: app
+#         POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+#       volumes:
+#         - pg-data:/var/lib/postgresql/data
+#       healthcheck:
+#         test: ["CMD-SHELL", "pg_isready -U app -d app"]
+#         interval: 5s
+#       restart: unless-stopped
+#
+#     pg-dump:
+#       image: prodrigestivill/postgres-backup-local:14
+#       environment:
+#         POSTGRES_HOST: postgres
+#         POSTGRES_DB: app
+#         POSTGRES_USER: app
+#         POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+#         POSTGRES_EXTRA_OPTS: "-F d -Z 0"
+#         SCHEDULE: "@hourly"
+#         BACKUP_DIR: /dumps
+#         BACKUP_KEEP_DAYS: 1
+#       volumes:
+#         - dumps:/dumps
+#       depends_on:
+#         postgres: { condition: service_healthy }
+#       restart: unless-stopped
+#
+#     backup:
+#       image: ghcr.io/gedasfx/docker-backup:1
+#       environment:
+#         BACKUP_NAME: my-app
+#         BACKUP_CRON: "30 1 * * *"
+#         BACKUP_RESTIC_REPOSITORY: /mnt/repo
+#         BACKUP_RESTIC_PASSWORD: ${BACKUP_RESTIC_PASSWORD}
+#         BACKUP_RESTIC_SOURCES: /dumps
+#         BACKUP_WEBHOOK_URL: ${BACKUP_WEBHOOK_URL:-}
+#       volumes:
+#         - dumps:/dumps:ro
+#         - /path/to/backups/my-app:/mnt/repo
+#       depends_on:
+#         - pg-dump
+#       restart: unless-stopped

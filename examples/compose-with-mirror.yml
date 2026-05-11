@@ -1,52 +1,45 @@
-# Two-pronged service: small mutating state gets versioned restic
-# snapshots, bulky immutable data gets an rsync mirror.
+# Restic + rsync: small mutating state gets versioned snapshots,
+# bulky immutable data gets a current-state mirror.
 #
 # Good fit for: any service with a content-addressed media store
-# alongside a small configuration / index. Versioning the bulky store
-# is wasteful (files never change once written, so snapshots would
-# only inflate metadata); mirroring keeps a current-state copy that's
-# trivial to restore from. Versioned snapshots cover the small,
-# actually-mutating pieces.
+# alongside a small config or index. Versioning the bulky store
+# would be wasteful (files never change once written); mirroring
+# keeps a copy that's trivial to restore from.
 
-name: gallery
+name: my-app
 
 services:
   app:
-    image: ghcr.io/example/gallery:latest
+    image: my-app:latest
     volumes:
-      - /opt/services/public/gallery/storage:/var/lib/gallery
+      - app-data:/app/data
     restart: unless-stopped
 
   # ─── backup sidecar ─────────────────────────────────────────────
   backup:
     image: ghcr.io/gedasfx/docker-backup:1
     environment:
-      BACKUP_NAME: gallery
-      BACKUP_CRON: "40 1 * * *"            # 10 min after my-bot to avoid HDD contention
+      BACKUP_NAME: my-app
+      BACKUP_CRON: "30 1 * * *"
 
-      # ── restic prong: small mutating state, point-in-time recovery
+      # ── restic: small mutating state
       BACKUP_RESTIC_REPOSITORY: /mnt/repo
       BACKUP_RESTIC_PASSWORD: ${BACKUP_RESTIC_PASSWORD}
-      BACKUP_RESTIC_SOURCES: "/sources/index.db /sources/config"
+      BACKUP_RESTIC_SOURCES: "/sources/db.sqlite /sources/config"
       BACKUP_RESTIC_EXCLUDES: "*.tmp *.lock"
 
-      # ── rsync prong: bulky immutable data, current-state mirror
+      # ── rsync: bulky immutable data
       BACKUP_RSYNC_SRC: /sources/media
       BACKUP_RSYNC_DST: /mnt/mirror
-      # Default rsync args are `-a --delete`. Override only if you
-      # want to keep files removed from primary, drop --delete:
-      # BACKUP_RSYNC_ARGS: "-a"
 
       BACKUP_WEBHOOK_URL: ${BACKUP_WEBHOOK_URL:-}
 
     volumes:
-      # The whole storage dir is mounted read-only; restic + rsync
-      # both pick their pieces out of it.
-      - /opt/services/public/gallery/storage:/sources:ro
-
-      # Restic repo + rsync mirror, both on the HDD pool. Per-service
-      # paths give isolated blast radius if either repo corrupts.
-      - /mnt/hoard/backups/gallery:/mnt/repo
-      - /mnt/hoard/gallery/storage-mirror:/mnt/mirror
+      - app-data:/sources:ro
+      - /path/to/backups/my-app:/mnt/repo
+      - /path/to/mirror/my-app:/mnt/mirror
 
     restart: unless-stopped
+
+volumes:
+  app-data:

@@ -1,53 +1,40 @@
-# Simplest case: one app with a small data volume, versioned restic
-# snapshots only. No rsync mirror, no database, no pre-hook.
+# Restic-only: versioned snapshots of a small data volume.
+# No rsync mirror, no database, no pre-hook.
 #
-# Good fit for: discord bots with config files, small static-content
-# services, anything where the entire dataset is small enough that
-# full point-in-time recovery over a month of snapshots costs nothing.
-#
-# Drop this compose somewhere, set the two passwords in .env next to
-# it, and `docker compose up -d`.
+# Good fit for: apps with config files, small state directories,
+# anything where the entire dataset is small enough that a month
+# of point-in-time snapshots costs nothing.
 
-name: my-bot
+name: my-app
 
 services:
   app:
-    image: ghcr.io/example/my-bot:latest
+    image: my-app:latest
     volumes:
-      - /opt/services/public/my-bot/data:/app/data
+      - app-data:/app/data
     restart: unless-stopped
 
   # ─── backup sidecar ─────────────────────────────────────────────
   backup:
-    image: ghcr.io/gedasfx/docker-backup:1   # pin minor; Watchtower follows
+    image: ghcr.io/gedasfx/docker-backup:1
     environment:
-      BACKUP_NAME: my-bot
-      # Default cron is 01:30 daily; override here if you need to
-      # stagger across services on the same box.
+      BACKUP_NAME: my-app
       BACKUP_CRON: "30 1 * * *"
 
-      # Restic prong — the only prong this service uses.
       BACKUP_RESTIC_REPOSITORY: /mnt/repo
       BACKUP_RESTIC_PASSWORD: ${BACKUP_RESTIC_PASSWORD}
       BACKUP_RESTIC_SOURCES: /sources
 
-      # Optional: default is `--keep-daily 7 --keep-weekly 4 --prune`
-      # which is what most homelab services want. Comment out unless
-      # you need a different retention.
+      # Optional: override default retention (--keep-daily 7 --keep-weekly 4)
       # BACKUP_RESTIC_FORGET: "--keep-daily 30 --keep-monthly 12"
 
-      # Webhook: failure pings + a heartbeat every 7th successful run
-      # so the dead-cron failure mode surfaces.
       BACKUP_WEBHOOK_URL: ${BACKUP_WEBHOOK_URL:-}
 
     volumes:
-      # Read-only mount of the data we want to back up. Path on the
-      # left is the same host dir the app uses; on the right is the
-      # canonical /sources mount-point inside the backup container.
-      - /opt/services/public/my-bot/data:/sources:ro
-
-      # Restic repo on the slow disk (HDD pool). Encrypted, versioned,
-      # dedup'd. The first run will run `restic init` here.
-      - /mnt/hoard/backups/my-bot:/mnt/repo
+      - app-data:/sources:ro
+      - /path/to/backups/my-app:/mnt/repo
 
     restart: unless-stopped
+
+volumes:
+  app-data:

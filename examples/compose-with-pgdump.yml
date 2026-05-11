@@ -1,81 +1,68 @@
-# Postgres-backed service using docker-backup's built-in pg_dump prong.
-# This is the recommended pattern when the database major matches the
-# pg client baked into the image (alpine 3.20 → pg16; check the README
-# for what your tag carries).
+# Built-in pg_dump: recommended pattern when the database major
+# matches the pg client in the image (alpine 3.20 = pg16).
 #
-# Flow:
-#   backup container runs at $BACKUP_CRON. Before restic, it:
-#     1. pg_dump -F d -Z 0 into an image-managed scratch dir
-#     2. auto-prepends that dir to BACKUP_RESTIC_SOURCES
-#     3. restic snapshots it alongside whatever else you listed
-#     4. wipes the scratch dir after success (no plaintext leakage
-#        in the image layer)
+# The backup container dumps pg_dump -F d -Z 0 into a scratch dir,
+# auto-adds it to restic sources, snapshots everything, then wipes
+# the scratch dir. No extra containers, no shared volumes, no
+# docker.sock.
 #
-# No extra dump container, no shared /dumps volume, no docker.sock.
 # For major-version mismatch see compose-pg-advanced.yml.
 
-name: art-tagger
+name: my-app
 
 services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_DB: gallery
-      POSTGRES_USER: gallery
+      POSTGRES_DB: app
+      POSTGRES_USER: app
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
-      - /opt/services/public/art-tagger/postgres:/var/lib/postgresql/data
+      - pg-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U gallery -d gallery"]
+      test: ["CMD-SHELL", "pg_isready -U app -d app"]
       interval: 5s
       timeout: 3s
       retries: 10
     restart: unless-stopped
 
   app:
-    image: ghcr.io/example/art-tagger:latest
+    image: my-app:latest
     environment:
-      GALLERY_DATABASE_URL: postgresql+asyncpg://gallery:${POSTGRES_PASSWORD}@postgres:5432/gallery
-      GALLERY_STORAGE_DIR: /var/lib/gallery
-    volumes:
-      - /opt/services/public/art-tagger/storage:/var/lib/gallery
+      DATABASE_URL: postgres://app:${POSTGRES_PASSWORD}@postgres:5432/app
     depends_on:
       postgres: { condition: service_healthy }
     restart: unless-stopped
 
-  # ─── docker-backup with built-in pg_dump prong ──────────────────
+  # ─── backup sidecar (pg image tag) ────────────────────────────────
   backup:
     image: ghcr.io/gedasfx/docker-backup:1-pg
     environment:
-      BACKUP_NAME: art-tagger
-      BACKUP_CRON: "50 1 * * *"
+      BACKUP_NAME: my-app
+      BACKUP_CRON: "30 1 * * *"
 
-      # ── built-in pg prong: setting BACKUP_PG_HOST opts in ──────
-      BACKUP_PG_HOST: postgres                    # internal compose hostname
-      BACKUP_PG_USER: gallery
-      BACKUP_PG_DB: gallery
+      # ── pg module: setting BACKUP_PG_HOST opts in
+      BACKUP_PG_HOST: postgres
+      BACKUP_PG_USER: app
+      BACKUP_PG_DB: app
       BACKUP_PG_PASSWORD: ${POSTGRES_PASSWORD}
-      # Optionally narrow the dump to specific tables:
-      # BACKUP_PG_TABLES: "images,tags,image_tags"
+      # BACKUP_PG_TABLES: "users,orders"    # optional: limit to specific tables
 
-      # ── restic prong: dump path is added automatically; you can
-      #    still snapshot additional sources like a vectors index.
+      # ── restic: pg dump path is added automatically
       BACKUP_RESTIC_REPOSITORY: /mnt/repo
       BACKUP_RESTIC_PASSWORD: ${BACKUP_RESTIC_PASSWORD}
-      BACKUP_RESTIC_SOURCES: /sources/vectors.npz
-
-      # ── rsync prong: the bulky media store
-      BACKUP_RSYNC_SRC: /sources/images
-      BACKUP_RSYNC_DST: /mnt/mirror
+      # Additional non-db sources can still be listed:
+      # BACKUP_RESTIC_SOURCES: /sources/uploads
 
       BACKUP_WEBHOOK_URL: ${BACKUP_WEBHOOK_URL:-}
 
     volumes:
-      - /opt/services/public/art-tagger/storage:/sources:ro
-      - /mnt/hoard/backups/art-tagger:/mnt/repo
-      - /mnt/hoard/art-tagger/storage-mirror:/mnt/mirror
+      - /path/to/backups/my-app:/mnt/repo
 
     depends_on:
       postgres: { condition: service_healthy }
 
     restart: unless-stopped
+
+volumes:
+  pg-data:
