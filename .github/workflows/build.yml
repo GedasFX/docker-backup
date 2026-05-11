@@ -13,6 +13,8 @@ jobs:
     permissions:
       contents: read
       packages: write
+      attestations: write
+      id-token: write
     strategy:
       matrix:
         include:
@@ -39,6 +41,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # Build locally for Trivy scan (no push)
       - uses: docker/build-push-action@v6
         with:
           context: .
@@ -59,7 +62,9 @@ jobs:
           severity: HIGH,CRITICAL
           exit-code: 1
 
-      - name: Tag and push
+      # Generate tag list for push
+      - name: Generate tags
+        id: tags
         if: github.event_name != 'pull_request'
         run: |
           v="${{ steps.meta.outputs.version }}"
@@ -69,12 +74,39 @@ jobs:
           sfx="${{ matrix.suffix }}"
           base="ghcr.io/${{ github.repository_owner }}/docker-backup"
 
+          tags=""
           for t in \
             "latest${sfx}" \
             "${v%.*}${sfx}" \
             "${v}${sfx}" \
             "${v}${sfx}-${s}-${d}" \
             "${v}${sfx}-alpine${a}-${s}-${d}"; do
-            docker tag docker-backup:scan "$base:$t"
-            docker push "$base:$t"
+            tags="${tags:+${tags},}${base}:${t}"
           done
+          echo "tags=$tags" >> "$GITHUB_OUTPUT"
+
+      # Push (cache hit — instant rebuild)
+      - name: Push
+        id: push
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: ${{ matrix.target }}
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          build-args: |
+            SOURCE_VERSION=${{ steps.meta.outputs.version }}
+            SOURCE_SHA=${{ steps.meta.outputs.sha }}
+            BUILD_DATE=${{ steps.meta.outputs.date }}
+            ALPINE_VERSION=${{ steps.meta.outputs.alpine }}
+          cache-from: type=gha,scope=${{ matrix.target }}
+
+      # Attest provenance
+      - name: Attest
+        if: github.event_name != 'pull_request'
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ghcr.io/${{ github.repository_owner }}/docker-backup
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
