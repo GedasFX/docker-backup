@@ -10,8 +10,8 @@ set -euo pipefail
 : "${BACKUP_WEBHOOK_HEARTBEAT_EVERY:=7}"
 : "${BACKUP_VERBOSE:=}"
 
-SUCCESS_FILE="/var/run/last-success"
-COUNTER_FILE="/var/run/backup-counter"
+SUCCESS_FILE="/var/run/docker-backup/last-success"
+COUNTER_FILE="/var/run/docker-backup/counter"
 MODULE_DIR="/usr/local/lib/docker-backup/modules.d"
 
 t0=$(date +%s)

@@ -11,7 +11,12 @@ services:
   # ─── Pattern A: docker exec via docker.sock ─────────────────────
   # backup container reaches into the running postgres container and
   # runs that container's own pg_dump. Major-version always matches
-  # the server. Trade: docker.sock = root inside the backup container.
+  # the server.
+  #
+  # Caveat: the image runs as non-root (uid 1000). Mounting docker.sock
+  # requires adding the host's docker group (typically gid 999 or 998)
+  # so the backup user can talk to the daemon. Check your host's docker
+  # gid with: stat -c '%g' /var/run/docker.sock
 
   postgres-a:
     image: postgres:17-alpine
@@ -28,6 +33,8 @@ services:
 
   backup-a:
     image: ghcr.io/gedasfx/docker-backup:1
+    group_add:
+      - "999"   # docker group gid on the host — adjust to match yours
     environment:
       BACKUP_NAME: app-a
       BACKUP_CRON: "30 1 * * *"

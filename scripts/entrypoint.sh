@@ -57,8 +57,8 @@ fi
 log "prongs: restic=$restic_enabled rsync=$rsync_enabled modules=[${loaded_modules[*]:-}]"
 
 # ── write crontab ───────────────────────────────────────────────────
-crontab_line="$BACKUP_CRON /usr/local/bin/backup.sh >> /proc/1/fd/1 2>> /proc/1/fd/2"
-echo "$crontab_line" | crontab -
+CRONTAB_FILE="/var/run/docker-backup/crontab"
+echo "$BACKUP_CRON /usr/local/bin/backup.sh" > "$CRONTAB_FILE"
 
 log "cron: $BACKUP_CRON"
 
@@ -80,5 +80,5 @@ if [[ "$restic_enabled" == "true" ]]; then
 fi
 
 # ── hand off to cron ────────────────────────────────────────────────
-log "entrypoint complete, starting crond"
-exec crond -f -l 2
+log "entrypoint complete, starting supercronic"
+exec supercronic "$CRONTAB_FILE"

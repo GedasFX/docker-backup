@@ -3,7 +3,7 @@ set -euo pipefail
 
 : "${BACKUP_HEALTHCHECK_MAX_AGE:=93600}"
 
-SUCCESS_FILE="/var/run/last-success"
+SUCCESS_FILE="/var/run/docker-backup/last-success"
 
 # No success recorded yet — healthy until first expected run window passes
 if [[ ! -f "$SUCCESS_FILE" ]]; then
