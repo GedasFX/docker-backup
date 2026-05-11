@@ -25,7 +25,8 @@ LABEL org.opencontainers.image.source="https://github.com/gedasfx/docker-backup"
 COPY scripts/entrypoint.sh /usr/local/bin/
 COPY scripts/backup.sh     /usr/local/bin/
 COPY scripts/healthcheck.sh /usr/local/bin/
-RUN chmod +x /usr/local/bin/*.sh
+RUN chmod +x /usr/local/bin/*.sh \
+    && mkdir -p /usr/local/lib/docker-backup/modules.d
 
 HEALTHCHECK --interval=1h --timeout=5s --retries=2 \
   CMD /usr/local/bin/healthcheck.sh
@@ -36,3 +37,4 @@ ENTRYPOINT ["tini", "--", "/usr/local/bin/entrypoint.sh"]
 FROM base AS pg
 
 RUN apk add --no-cache postgresql16-client
+COPY scripts/modules/pg.sh /usr/local/lib/docker-backup/modules.d/

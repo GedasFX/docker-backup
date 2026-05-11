@@ -10,9 +10,9 @@ set -euo pipefail
 : "${BACKUP_WEBHOOK_HEARTBEAT_EVERY:=7}"
 : "${BACKUP_VERBOSE:=}"
 
-PGDUMP_DIR="/var/cache/docker-backup/pgdump"
 SUCCESS_FILE="/var/run/last-success"
 COUNTER_FILE="/var/run/backup-counter"
+MODULE_DIR="/usr/local/lib/docker-backup/modules.d"
 
 t0=$(date +%s)
 total_bytes=0
@@ -67,49 +67,28 @@ run_hook() {
   fi
 }
 
-# ── pg_dump prong ───────────────────────────────────────────────────
-pg_sources=""
-if [[ -n "${BACKUP_PG_HOST:-}" ]]; then
-  log "pg_dump starting"
-  rm -rf "$PGDUMP_DIR"
-  mkdir -p "$PGDUMP_DIR"
+# ── load modules ────────────────────────────────────────────────────
+loaded_modules=()
+for mod_file in "$MODULE_DIR"/*.sh; do
+  [[ -f "$mod_file" ]] || continue
+  mod_name=$(basename "$mod_file" .sh)
+  source "$mod_file"
+  loaded_modules+=("$mod_name")
+done
 
-  # password handling
-  if [[ -n "${BACKUP_PG_PASSWORD_FILE:-}" ]]; then
-    export PGPASSWORD
-    PGPASSWORD=$(cat "$BACKUP_PG_PASSWORD_FILE")
-  elif [[ -n "${BACKUP_PG_PASSWORD:-}" ]]; then
-    export PGPASSWORD="$BACKUP_PG_PASSWORD"
+# ── module backups (dumps) ──────────────────────────────────────────
+for mod_name in "${loaded_modules[@]}"; do
+  "mod_${mod_name}_backup"
+done
+
+# ── collect module sources for restic ───────────────────────────────
+module_sources=""
+for mod_name in "${loaded_modules[@]}"; do
+  ms=$("mod_${mod_name}_sources")
+  if [[ -n "$ms" ]]; then
+    module_sources="${module_sources:+$module_sources }$ms"
   fi
-
-  pg_args=(-F d -Z 0)
-  pg_args+=(-h "$BACKUP_PG_HOST")
-  pg_args+=(-p "${BACKUP_PG_PORT:-5432}")
-  pg_args+=(-U "$BACKUP_PG_USER")
-  pg_args+=(-d "$BACKUP_PG_DB")
-
-  # per-table selection
-  if [[ -n "${BACKUP_PG_TABLES:-}" ]]; then
-    IFS=',' read -ra tables <<< "$BACKUP_PG_TABLES"
-    for t in "${tables[@]}"; do
-      pg_args+=(-t "$t")
-    done
-  fi
-
-  # extra user args
-  if [[ -n "${BACKUP_PG_EXTRA_ARGS:-}" ]]; then
-    read -ra extra <<< "$BACKUP_PG_EXTRA_ARGS"
-    pg_args+=("${extra[@]}")
-  fi
-
-  pg_args+=(-f "$PGDUMP_DIR")
-
-  pg_t0=$(date +%s)
-  pg_dump "${pg_args[@]}" || fail "pg_dump failed"
-  log "pg_dump completed ($(($(date +%s) - pg_t0))s)"
-
-  pg_sources="$PGDUMP_DIR"
-fi
+done
 
 # ── pre-hook ────────────────────────────────────────────────────────
 run_hook "pre-hook" BACKUP_PRE BACKUP_PRE_SCRIPT
@@ -119,8 +98,8 @@ if [[ -n "${BACKUP_RESTIC_REPOSITORY:-}" ]]; then
   export RESTIC_REPOSITORY="$BACKUP_RESTIC_REPOSITORY"
   export RESTIC_PASSWORD="$BACKUP_RESTIC_PASSWORD"
 
-  # build sources list: pg dump dir (if active) + user-specified sources
-  all_sources="$pg_sources"
+  # build sources list: module sources + user-specified sources
+  all_sources="$module_sources"
   if [[ -n "${BACKUP_RESTIC_SOURCES:-}" ]]; then
     all_sources="${all_sources:+$all_sources }$BACKUP_RESTIC_SOURCES"
   fi
@@ -185,10 +164,10 @@ fi
 # ── post-hook ───────────────────────────────────────────────────────
 run_hook "post-hook" BACKUP_POST BACKUP_POST_SCRIPT
 
-# ── pg cleanup ──────────────────────────────────────────────────────
-if [[ -n "${BACKUP_PG_HOST:-}" ]]; then
-  rm -rf "$PGDUMP_DIR"
-fi
+# ── module cleanup ──────────────────────────────────────────────────
+for mod_name in "${loaded_modules[@]}"; do
+  "mod_${mod_name}_cleanup"
+done
 
 # ── success ─────────────────────────────────────────────────────────
 elapsed=$(( $(date +%s) - t0 ))
