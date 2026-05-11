@@ -31,6 +31,7 @@ jobs:
           echo "sha=$(git rev-parse --short=7 HEAD)" >> "$GITHUB_OUTPUT"
           echo "date=$(date -u +%Y%m%d)"             >> "$GITHUB_OUTPUT"
           echo "alpine=3.20"                         >> "$GITHUB_OUTPUT"
+          echo "image=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/docker-backup" >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-buildx-action@v3
 
@@ -72,7 +73,7 @@ jobs:
           d="${{ steps.meta.outputs.date }}"
           a="${{ steps.meta.outputs.alpine }}"
           sfx="${{ matrix.suffix }}"
-          base="ghcr.io/${{ github.repository_owner }}/docker-backup"
+          base="${{ steps.meta.outputs.image }}"
 
           tags=""
           for t in \
@@ -107,6 +108,6 @@ jobs:
         if: github.event_name != 'pull_request'
         uses: actions/attest-build-provenance@v2
         with:
-          subject-name: ghcr.io/${{ github.repository_owner }}/docker-backup
+          subject-name: ${{ steps.meta.outputs.image }}
           subject-digest: ${{ steps.push.outputs.digest }}
           push-to-registry: true
