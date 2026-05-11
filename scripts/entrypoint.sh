@@ -4,6 +4,7 @@ set -euo pipefail
 # ── defaults ────────────────────────────────────────────────────────
 : "${BACKUP_NAME:=${HOSTNAME}}"
 : "${BACKUP_INTERVAL:=86400}"
+: "${BACKUP_INITIAL_DELAY:=120}"
 : "${BACKUP_HEALTHCHECK_MAX_AGE:=93600}"
 
 MODULE_DIR="/usr/local/lib/docker-backup/modules.d"
@@ -75,8 +76,9 @@ if [[ "$restic_enabled" == "true" ]]; then
 fi
 
 # ── backup loop ─────────────────────────────────────────────────────
-log "entrypoint complete, first backup in ${BACKUP_INTERVAL}s"
+log "entrypoint complete, first backup in ${BACKUP_INITIAL_DELAY}s"
+sleep "$BACKUP_INITIAL_DELAY"
 while true; do
-  sleep "$BACKUP_INTERVAL"
   /usr/local/bin/backup.sh || true
+  sleep "$BACKUP_INTERVAL"
 done
