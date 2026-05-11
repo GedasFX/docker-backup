@@ -1,0 +1,11 @@
+name: rebuild
+
+on:
+  schedule:
+    - cron: "0 3 * * 0"   # Sun 03:00 UTC
+  workflow_dispatch:
+
+jobs:
+  rebuild:
+    uses: ./.github/workflows/build.yml
+    secrets: inherit

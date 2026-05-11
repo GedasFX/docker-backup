@@ -1,0 +1,80 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        include:
+          - target: base
+            suffix: ""
+          - target: pg
+            suffix: "-pg"
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: meta
+        run: |
+          echo "version=$(cat VERSION)"              >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse --short=7 HEAD)" >> "$GITHUB_OUTPUT"
+          echo "date=$(date -u +%Y%m%d)"             >> "$GITHUB_OUTPUT"
+          echo "alpine=3.20"                         >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        if: github.event_name != 'pull_request'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: ${{ matrix.target }}
+          load: true
+          tags: docker-backup:scan
+          build-args: |
+            SOURCE_VERSION=${{ steps.meta.outputs.version }}
+            SOURCE_SHA=${{ steps.meta.outputs.sha }}
+            BUILD_DATE=${{ steps.meta.outputs.date }}
+            ALPINE_VERSION=${{ steps.meta.outputs.alpine }}
+          cache-from: type=gha,scope=${{ matrix.target }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.target }}
+
+      - uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: docker-backup:scan
+          severity: HIGH,CRITICAL
+          exit-code: 1
+
+      - name: Tag and push
+        if: github.event_name != 'pull_request'
+        run: |
+          v="${{ steps.meta.outputs.version }}"
+          s="${{ steps.meta.outputs.sha }}"
+          d="${{ steps.meta.outputs.date }}"
+          a="${{ steps.meta.outputs.alpine }}"
+          sfx="${{ matrix.suffix }}"
+          base="ghcr.io/${{ github.repository_owner }}/docker-backup"
+
+          for t in \
+            "latest${sfx}" \
+            "${v%.*}${sfx}" \
+            "${v}${sfx}" \
+            "${v}${sfx}-${s}-${d}" \
+            "${v}${sfx}-alpine${a}-${s}-${d}"; do
+            docker tag docker-backup:scan "$base:$t"
+            docker push "$base:$t"
+          done
