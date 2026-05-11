@@ -5,8 +5,6 @@ ARG SOURCE_VERSION=dev
 ARG SOURCE_SHA=local
 ARG BUILD_DATE=unknown
 ARG ALPINE_VERSION=3.20
-ARG SUPERCRONIC_VERSION=0.2.33
-
 RUN apk add --no-cache \
         restic \
         rsync \
@@ -21,7 +19,7 @@ RUN apk add --no-cache \
         aarch64) sc_arch="linux-arm64" ;; \
         *) echo "unsupported arch: $arch" >&2; exit 1 ;; \
     esac \
-    && curl -fsSL "https://github.com/aptible/supercronic/releases/download/v${SUPERCRONIC_VERSION}/supercronic-${sc_arch}" \
+    && curl -fsSL "https://github.com/aptible/supercronic/releases/latest/download/supercronic-${sc_arch}" \
         -o /usr/local/bin/supercronic \
     && chmod +x /usr/local/bin/supercronic
 
