@@ -5,6 +5,7 @@ ARG SOURCE_VERSION=dev
 ARG SOURCE_SHA=local
 ARG BUILD_DATE=unknown
 ARG ALPINE_VERSION=3.20
+
 RUN apk add --no-cache \
         restic \
         rsync \
@@ -13,15 +14,7 @@ RUN apk add --no-cache \
         bash \
         docker-cli \
         coreutils \
-    && arch=$(uname -m) \
-    && case "$arch" in \
-        x86_64)  sc_arch="linux-amd64" ;; \
-        aarch64) sc_arch="linux-arm64" ;; \
-        *) echo "unsupported arch: $arch" >&2; exit 1 ;; \
-    esac \
-    && curl -fsSL "https://github.com/aptible/supercronic/releases/latest/download/supercronic-${sc_arch}" \
-        -o /usr/local/bin/supercronic \
-    && chmod +x /usr/local/bin/supercronic
+        su-exec
 
 RUN addgroup -g 1000 backup \
     && adduser -u 1000 -G backup -s /bin/bash -D backup \
@@ -43,13 +36,10 @@ RUN chmod +x /usr/local/bin/*.sh
 HEALTHCHECK --interval=1h --timeout=5s --retries=2 \
   CMD /usr/local/bin/healthcheck.sh
 
-USER backup
 ENTRYPOINT ["tini", "--", "/usr/local/bin/entrypoint.sh"]
 
 # ── pg: adds built-in pg_dump support ──────────────────────────────
 FROM base AS pg
 
-USER root
 RUN apk add --no-cache postgresql16-client
 COPY scripts/modules/pg.sh /usr/local/lib/docker-backup/modules.d/
-USER backup
