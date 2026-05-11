@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # ── defaults ────────────────────────────────────────────────────────
-: "${BACKUP_NAME:=${HOSTNAME}}"
+: "${BACKUP_NAME:=default}"
 : "${BACKUP_RESTIC_FORGET:=--keep-daily 7 --keep-weekly 4}"
 : "${BACKUP_RESTIC_CHECK_DOW:=7}"
 : "${BACKUP_RSYNC_ARGS:=-a --delete}"

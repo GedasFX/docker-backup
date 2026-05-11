@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # ── defaults ────────────────────────────────────────────────────────
-: "${BACKUP_NAME:=${HOSTNAME}}"
+: "${BACKUP_NAME:=default}"
 : "${BACKUP_INTERVAL:=86400}"
 : "${BACKUP_INITIAL_DELAY:=120}"
 : "${BACKUP_HEALTHCHECK_MAX_AGE:=93600}"

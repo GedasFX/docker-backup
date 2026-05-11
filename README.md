@@ -31,7 +31,7 @@ for the `group_add` workaround when mounting `docker.sock`.
 |----------|---------|-------------|
 | `BACKUP_INTERVAL` | `86400` | Seconds between backup runs (24h). |
 | `BACKUP_INITIAL_DELAY` | `120` | Seconds to wait before the first backup after container start. Gives services time to initialize. Set to `0` to run immediately. |
-| `BACKUP_NAME` | `$HOSTNAME` | Identifier used in logs and webhook payloads. |
+| `BACKUP_NAME` | `default` | Identifier used in logs, webhook payloads, and as the restic snapshot tag. Must be stable across container recreates — do not rely on the default for multi-service setups. |
 
 ### Restic (versioned snapshots)
 
